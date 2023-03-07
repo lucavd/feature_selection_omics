@@ -1,7 +1,9 @@
-library(tcgsaseq)
+#library(tcgsaseq) # devtools::install_github("denisagniel/tcgsaseq"), predecessore di dearseq
+library(dearseq)
 library(dplyr)
 library(edgeR)
 library(DESeq2)
+library(limma)
 library(tidyr)
 library(stringr)
 library(ggplot2)
@@ -107,13 +109,13 @@ nGenes <- 10000
                             p0 = 1-p1,
                             two_group = FALSE)
 
-  y <- sim_data$y
+  y <- sim_data$y # 10 samples x 10000 genes
   x <- sim_data$x
   z <- sim_data$z %>% as.matrix
   design_r <- cbind(x, z)
 
-
-  vsi_res <- try(varseq(exprmat = t(y), covariates = x, variables2test = z, which_test = 'asymptotic', doPlot = FALSE, gene_based_weights = FALSE), silent = TRUE)
+# dearseq asymptotic
+  vsi_res <- try(dearseq::dear_seq(exprmat = t(y), covariates = x, variables2test = z, which_test = 'asymptotic', gene_based_weights = FALSE), silent = TRUE)
   if (class(vsi_res) != 'try-error') {
     vsi_p <- data.frame(
       gene = 1:nGenes,
@@ -128,24 +130,26 @@ nGenes <- 10000
     )
   }
 
-  vsn_res <- varseq(exprmat = t(y), covariates = x, variables2test = z, which_test = 'asymptotic', doPlot = FALSE, which_weights = 'none')
+  vsn_res <- dearseq::dear_seq(exprmat = t(y), covariates = x, variables2test = z, which_test = 'asymptotic', which_weights = 'none')
   vsn_p <- data.frame(
     gene = 1:nGenes,
     vs_pval = vsn_res$pvals$rawPval,
     vs_pval_adj = vsn_res$pvals$adjPval
   )
+
+# dearseq permutation
   # if (n <= 100) {
   #system.time(
-    vsp_res <- varseq(exprmat = t(y), covariates = x, variables2test = z, which_test = 'permutation', doPlot = FALSE, which_weights = 'none',
+    vsp_res <- dearseq::dear_seq(exprmat = t(y), covariates = x, variables2test = z, which_test = 'permutation', which_weights = 'none',
                                 n_perm = 1000)
   #  )
   vsp_p <- data.frame(
     gene = 1:nGenes,
     vsp_pval = vsp_res$pvals$rawPval,
-    vsp_pval_adj = vsp_res$pvals$FDR
+    vsp_pval_adj = vsp_res$pvals$adjPval
   )
   qplot(vsp_res$pvals$rawPval, vsp_res$pvals$adjPval) + geom_abline(slope=1, intercept=0, col="red") +xlim(0,1) + ylim(0,1)
-  sum(vsp_res$pvals$FDR<0.05)
+  sum(vsp_res$pvals$adjPval<0.05)
   nreject <- min(sum(vsp_res$pvals$adjPval < 0.05), 1, na.rm=TRUE)
   eFDR <- sum(vsp_res$pvals$adjPval[-(1:(nGenes*p1))] < 0.05)/nreject
   eTDR <- sum(vsp_res$pvals$adjPval[1:(nGenes*p1)] < 0.05)/nreject
@@ -156,6 +160,7 @@ nGenes <- 10000
       ylim = c(0,1))
   abline(a = 0, b = 1, lty = 2)
 
+# edgeR
 
   ydge <- edgeR::DGEList(counts=t(y))
   ydge <- edgeR::calcNormFactors(ydge)
@@ -168,6 +173,8 @@ nGenes <- 10000
   ) %>%
     mutate(edger_pval_adj = p.adjust(edger_pval, method = 'fdr'))
 
+# limma
+
   vv <- limma::voom(ydge,design_r)
   voom_fit <- limma::lmFit(vv,design_r)
   voom_fit <- limma::eBayes(voom_fit)
@@ -177,6 +184,7 @@ nGenes <- 10000
   ) %>%
     mutate(voom_pval_adj = p.adjust(voom_pval, method = 'fdr'))
 
+## DEseq2
   # if (n <=150) {
   dsq_df <- cbind.data.frame("indiv"=as.factor(sim_data$indiv),
                              "time"=as.numeric(z),
@@ -203,7 +211,8 @@ nGenes <- 10000
   }
   # }
 
-
+# all together
+  
   all_p <-
     vsn_p %>%
     inner_join(vsi_p) %>%
